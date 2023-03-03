@@ -1,2 +1,5 @@
 # Vicer
-Serving content from a git repository via Gemini as MirageOS unikernel
+
+Vicer is a MirageOS unikernel which serves our blog content.
+
+Heavily inspired by [unipi](https://github.com/roburio/unipi/).
