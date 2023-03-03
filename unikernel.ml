@@ -225,9 +225,17 @@ struct
     | Ok body -> Mehari.(response_body (string body)) gemini_en
     | Error _ -> not_found
 
+  let sync blog _ =
+    Git_kv.pull blog >|= function
+    | Ok _ -> Mehari.response_text "Succefully pulled repository."
+    | Error err ->
+        let body = Format.asprintf "%a" Store.pp_error err in
+        Mehari.(response_body (string body) plaintext)
+
   let router blog coms =
     M.router
       [
+        M.route (Key_gen.hook ()) (sync blog);
         M.route "/misc.gmi" serve_misc;
         M.route "/articles" (fun _ ->
             M.respond Mehari.redirect_temp "/gemlog.gmi");
