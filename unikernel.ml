@@ -149,6 +149,49 @@ struct
   let not_found = Mehari.(response not_found) ""
   let gemini_en = Mehari.gemini ~charset:"utf-8" ~lang:[ "en" ] ()
 
+  let coms_feed =
+    object (self)
+      val entries : (string * Comment.t) Queue.t = Queue.create ()
+      val mutable updated = Ptime.epoch
+
+      method add_entry url ({ Comment.date = date, time; _ } as com) =
+        updated <- Ptime.of_date_time (date, (time, 0)) |> Option.get;
+        if Queue.length entries > 10 then
+          let _ = Queue.take entries in
+          Queue.add (url, com) entries
+        else Queue.add (url, com) entries
+
+      method entry_of_com article_url
+          { Comment.author; date = date, time; body } =
+        let title =
+          Printf.sprintf "New comment of %s on article %S" author article_url
+        in
+        let id =
+          Printf.sprintf "heyplzlookat.me/articles/%s/comment" article_url
+          |> Uri.of_string
+        in
+        Syndic.Atom.entry ~id ~title:(Text title) ~content:(Text body)
+          ~authors:(Syndic.Atom.author author, [])
+          ~updated:(Ptime.of_date_time (date, (time, 0)) |> Option.get)
+          ()
+
+      method to_atom =
+        let open Syndic.Atom in
+        let xml =
+          feed ~generator:(generator "Vicer")
+            ~id:(Uri.of_string "heyplzlookat.me/articles/comments.xml")
+            ~title:(Text "Heyplzlookat's comments feed") ~updated
+            (Queue.fold
+               (fun es (url, com) -> self#entry_of_com url com :: es)
+               [] entries)
+          |> Syndic.Atom.to_xml
+        in
+        Format.asprintf "<?xml version=\"1.0\" encoding=\"UTF-8\"?>%s"
+          (Syndic.XML.to_string xml ~ns_prefix:(function
+            | "http://www.w3.org/2005/Atom" -> Some ""
+            | _ -> Some "http://www.w3.org/2005/Atom"))
+    end
+
   let post_com blog coms req =
     let article_url = Mehari.param req 1 in
     Store.exists blog
@@ -172,6 +215,7 @@ struct
             in
             let com = Comment.make ~author ~date (Uri.pct_decode body) in
             let+ () = ComStore.post coms article_url com in
+            coms_feed#add_entry article_url com;
             let redirect = Filename.concat "/articles" article_url in
             Mehari.(response redirect_temp) redirect)
     | Ok (Some `Dictionary | None) -> Lwt.return not_found
@@ -232,6 +276,11 @@ struct
         let body = Format.asprintf "%a" Store.pp_error err in
         Mehari.(response_body (string body) plaintext)
 
+  let comments_feed _ =
+    M.respond_body
+      (Mehari.string coms_feed#to_atom)
+      (Mehari.make_mime ~charset:"utf-8" "application/atom+xml")
+
   let router blog coms =
     M.router
       [
@@ -239,6 +288,7 @@ struct
         M.route "/misc.gmi" serve_misc;
         M.route "/articles" (fun _ ->
             M.respond Mehari.redirect_temp "/gemlog.gmi");
+        M.route "/articles/comments.xml" comments_feed;
         M.route ~regex:true {|/articles/([a-zA-Z0-9_-]+\.gmi)/comment|}
           (post_com blog coms);
         M.route ~regex:true {|/articles/([a-zA-Z0-9_-]+\.gmi)|}

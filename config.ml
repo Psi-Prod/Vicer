@@ -47,6 +47,7 @@ let packages =
     package ~min:"0.2" "mehari-mirage";
     package "git-kv";
     package "ezjsonm";
+    package "syndic";
   ]
 
 let vicer =
