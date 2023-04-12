@@ -269,12 +269,22 @@ struct
     | Ok body -> Mehari.(response_body (string body)) gemini_en
     | Error _ -> not_found
 
-  let sync blog _ =
-    Git_kv.pull blog >|= function
-    | Ok _ -> Mehari.response_text "Succefully pulled repository."
-    | Error err ->
-        let body = Format.asprintf "%a" Store.pp_error err in
-        Mehari.(response_body (string body) plaintext)
+  let sync ~blog ~coms _ =
+    let* content_msg =
+      Git_kv.pull blog >|= function
+      | Ok _ -> "Succefully pulled content repository.\n"
+      | Error err ->
+          Format.asprintf "Error while pulling content repository:\n%a\n"
+            Store.pp_error err
+    in
+    let+ coms_msg =
+      Git_kv.pull coms >|= function
+      | Ok _ -> "Succefully pulled commentaries repository."
+      | Error err ->
+          Format.asprintf "Error while pulling commentaries repository: %a"
+            Store.pp_error err
+    in
+    Mehari.(response_body (string (content_msg ^ coms_msg)) plaintext)
 
   let comments_feed _ =
     M.respond_body
@@ -284,7 +294,7 @@ struct
   let router blog coms =
     M.router
       [
-        M.route ("/" ^ Key_gen.hook ()) (sync blog);
+        M.route ("/" ^ Key_gen.hook ()) (sync ~blog ~coms);
         M.route "/misc.gmi" serve_misc;
         M.route "/articles" (fun _ ->
             M.respond Mehari.redirect_temp "/gemlog.gmi");

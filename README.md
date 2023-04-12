@@ -7,7 +7,7 @@ Vicer is a MirageOS unikernel which serves our blog content from a Git repositor
 ```bash
 mirage configure -t <target> \
   --port # The TCP port to listen on (defaults to 1965)
-  --hook "xxx" \ # Secret URL of the webhook to resynchronize content repository state with remote (beginning "/" must not be specified)
+  --hook "xxx" \ # Secret URL of the webhook to resynchronize content and comments repositories state with remote (beginning "/" must not be specified)
   --certs-remote "git@localhost:certificates.git#master" \ # TLS certificates git remote
   --blog-remote "git@localhost:blog.git#master" \ # Blog content git remote
   --comments-remote "git@localhost:comments.git#master" \ # Comments store git remote
