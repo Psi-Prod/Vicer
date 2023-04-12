@@ -284,7 +284,7 @@ struct
   let router blog coms =
     M.router
       [
-        M.route (Key_gen.hook ()) (sync blog);
+        M.route ("/" ^ Key_gen.hook ()) (sync blog);
         M.route "/misc.gmi" serve_misc;
         M.route "/articles" (fun _ ->
             M.respond Mehari.redirect_temp "/gemlog.gmi");
