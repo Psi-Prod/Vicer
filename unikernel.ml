@@ -24,9 +24,9 @@ module Comment = struct
     let open Ezjsonm in
     dict
       [
-        ("author", string author);
+        ("author", encode_string author);
         ("date", pair (triple int int int) (triple int int int) date);
-        ("body", string body);
+        ("body", encode_string body);
       ]
 
   let make ~author ~date body = { author; date; body }
