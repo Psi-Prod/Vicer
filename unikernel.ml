@@ -265,8 +265,13 @@ struct
       | Ok resp -> Lwt.return_ok resp
       | Error _ -> lookup (Filename.concat path "index.gmi")
     in
-    find (Mehari.target req) >|= function
-    | Ok body -> Mehari.(response_body (string body)) gemini_en
+    let target = Mehari.target req |> Uri.pct_decode in
+    find target >|= function
+    | Ok body ->
+        let mime =
+          Mehari.from_filename target |> Option.value ~default:gemini_en
+        in
+        Mehari.(response_body (string body)) mime
     | Error _ -> not_found
 
   let sync ~blog ~coms _ =
