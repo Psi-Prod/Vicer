@@ -296,6 +296,24 @@ struct
       (Mehari.string coms_feed#to_atom)
       (Mehari.make_mime ~charset:"utf-8" "application/atom+xml")
 
+  let serve_random_banners blog _ =
+    Store.list blog (Mirage_kv.Key.v "/banners") >>= function
+    | Ok banners -> (
+        let rindex = Randomconv.int ~bound:(List.length banners) R.generate in
+        match List.nth banners rindex with
+        | banner, `Value -> (
+            Store.get blog banner >|= function
+            | Ok body ->
+                let mime = Magic_mime.lookup (Mirage_kv.Key.to_string banner) in
+                Mehari.(response_body (string body) (make_mime mime))
+            | Error err ->
+                Log.warn (fun l -> l "%a" Store.pp_error err);
+                not_found)
+        | _, `Dictionary -> Lwt.return not_found)
+    | Error err ->
+        Log.warn (fun l -> l "%a" Store.pp_error err);
+        Lwt.return not_found
+
   let router blog coms =
     M.router
       [
@@ -308,10 +326,11 @@ struct
           (post_com blog coms);
         M.route ~regex:true {|/articles/([a-zA-Z0-9_-]+\.gmi)|}
           (serve_article blog coms);
+        M.route "/randbanner" (serve_random_banners blog);
         M.route ~regex:true "/(.*)" (serve_static blog);
       ]
 
-  let start git_ctx _default_clock _random stack _default_time =
+  let start git_ctx _default_clock () stack _default_time =
     let* certs_remote = Git_kv.connect git_ctx (Key_gen.certs_remote ()) in
     let* certs = X.certificate certs_remote `Default in
     let* blog = Git_kv.connect git_ctx (Key_gen.blog_remote ()) in
