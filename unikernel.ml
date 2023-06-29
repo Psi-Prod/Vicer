@@ -199,7 +199,7 @@ struct
     >>= function
     | Ok (Some `Value) -> (
         match Mehari.query req with
-        | None -> M.respond Mehari.input "Votre commentaire :"
+        | None | Some "" -> M.respond Mehari.input "Votre commentaire :"
         | Some body ->
             let author =
               (match Mehari.client_cert req with
