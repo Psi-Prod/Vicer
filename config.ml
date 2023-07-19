@@ -41,10 +41,14 @@ let ssh_authenticator =
   in
   Key.(create "ssh_authenticator" Arg.(opt (some string) None doc))
 
+let ssh_password =
+  let doc = Key.Arg.info ~doc:"The private SSH password." [ "ssh-password" ] in
+  Key.(create "ssh-password" Arg.(opt (some string) None doc))
+
 let packages =
   [
-    package ~min:"0.2" "mehari";
-    package ~min:"0.2" "mehari-mirage";
+    package "mehari" ~pin:"git+https://github.com/Psi-Prod/Mehari.git#master" ;
+    package "mehari-mirage" ~pin:"git+https://github.com/Psi-Prod/Mehari.git#master";
     package "git-kv";
     package "ezjsonm";
     package "syndic";
@@ -70,7 +74,8 @@ let git_client =
   let git = mimic_happy_eyeballs stack dns (generic_happy_eyeballs stack dns) in
   let tcp = tcpv4v6_of_stackv4v6 stack in
   merge_git_clients (git_tcp tcp git)
-    (git_ssh ~key:ssh_key ~authenticator:ssh_authenticator tcp git)
+    (git_ssh ~key:ssh_key ~authenticator:ssh_authenticator
+       ~password:ssh_password tcp git)
 
 let () =
   register "vicer"

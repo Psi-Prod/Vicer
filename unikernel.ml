@@ -40,7 +40,24 @@ module Comment = struct
   let pp_date fmt ((year, month, day), (hour, min, sec)) =
     Format.fprintf fmt "%i-%i-%i-%i-%i-%i" year month day hour min sec
 
-  let pp_date_hum fmt ((y, m, d), _) = Format.fprintf fmt "%02i-%02i-%02i" d m y
+  let pp_date_hum fmt ((y, m, d), _) =
+    let month =
+      match m with
+      | 1 -> "janvier"
+      | 2 -> "février"
+      | 3 -> "mars"
+      | 4 -> "avril"
+      | 5 -> "mai"
+      | 6 -> "juin"
+      | 7 -> "juillet"
+      | 8 -> "août"
+      | 9 -> "septembre"
+      | 10 -> "octobre"
+      | 11 -> "novembre"
+      | 12 -> "décembre"
+      | _ -> assert false
+    in
+    Format.fprintf fmt "%i %s %i" d month y
 
   let pp fmt { author; date; body } =
     Format.fprintf fmt "{ name = %S; date = %a; body = %S }" author pp_date date
@@ -147,7 +164,8 @@ struct
   module ComStore = CommentStore (P)
 
   let not_found = Mehari.(response not_found) ""
-  let gemini_en = Mehari.gemini ~charset:"utf-8" ~lang:[ "en" ] ()
+  let gemtext_en = Mehari.gemini ~charset:"utf-8" ~lang:[ "en" ] ()
+  let gemtext_fr = Mehari.gemini ~charset:"utf-8" ~lang:[ "fr" ] ()
 
   let coms_feed =
     object (self)
@@ -224,20 +242,18 @@ struct
         Lwt.return not_found
 
   let serve_misc _ =
-    let year, month, day =
-      P.now_d_ps () |> Ptime.unsafe_of_d_ps |> Ptime.to_date
-    in
+    let dt = P.now_d_ps () |> Ptime.unsafe_of_d_ps |> Ptime.to_date_time in
     let body =
       let open Mehari.Gemtext in
       [
         heading `H1 "Misc";
         newline;
-        heading `H2 (Format.asprintf "Today: %02i/%02i/%02i" year month day);
+        heading `H2 (Format.asprintf "Today: %a" Comment.pp_date_hum dt);
         newline;
         link "/" ~name:"Back to home";
       ]
     in
-    M.respond_body (Mehari.gemtext body) gemini_en
+    M.respond_body (Mehari.gemtext body) gemtext_en
 
   let serve_article blog coms req =
     let article_url = Mehari.param req 1 in
@@ -254,8 +270,7 @@ struct
               in
               header ^ comments
         in
-        let mime = Mehari.gemini ~charset:"utf-8" ~lang:[ "fr" ] () in
-        Mehari.(response_body (string (body ^ coms)) mime)
+        Mehari.(response_body (string (body ^ coms))) gemtext_fr
     | Error _ -> Lwt.return not_found
 
   let serve_static blog req =
@@ -269,25 +284,34 @@ struct
     find target >|= function
     | Ok body ->
         let mime =
-          Mehari.from_filename target |> Option.value ~default:gemini_en
+          match target with
+          | "/about.gmi" | "/software.gmi" -> gemtext_en
+          | _ -> Mehari.from_filename target |> Option.value ~default:gemtext_fr
         in
         Mehari.(response_body (string body)) mime
     | Error _ -> not_found
 
-  let sync ~blog ~coms _ =
+  let sync git_ctx ~blog ~coms _ =
+    let pull ref remote ~ok ~err =
+      Lwt.catch
+        (fun () -> Git_kv.connect git_ctx remote >|= Option.some)
+        (function Invalid_argument _ -> Lwt.return_none | exn -> Lwt.fail exn)
+      >|= function
+      | Some repo ->
+          ref := repo;
+          ok
+      | None -> err
+    in
     let* content_msg =
-      Git_kv.pull blog >|= function
-      | Ok _ -> "Succefully pulled content repository.\n"
-      | Error err ->
-          Format.asprintf "Error while pulling content repository:\n%a\n"
-            Store.pp_error err
+      pull blog (Key_gen.blog_remote ())
+        ~ok:"Succefully pulled content repository.\n"
+        ~err:"Error while cloning repository\n"
     in
     let+ coms_msg =
-      Git_kv.pull coms >|= function
-      | Ok _ -> "Succefully pulled commentaries repository."
-      | Error err ->
-          Format.asprintf "Error while pulling commentaries repository: %a"
-            Store.pp_error err
+      pull coms
+        (Key_gen.comments_remote ())
+        ~ok:"Succefully pulled commentaries repository."
+        ~err:"Error while pulling commentaries repository"
     in
     Mehari.(response_body (string (content_msg ^ coms_msg)) plaintext)
 
@@ -304,8 +328,11 @@ struct
         | banner, `Value -> (
             Store.get blog banner >|= function
             | Ok body ->
-                let mime = Magic_mime.lookup (Mirage_kv.Key.to_string banner) in
-                Mehari.(response_body (string body) (make_mime mime))
+                let mime =
+                  Mirage_kv.Key.to_string banner
+                  |> Magic_mime.lookup |> Mehari.make_mime
+                in
+                Mehari.(response_body (string body)) mime
             | Error err ->
                 Log.warn (fun l -> l "%a" Store.pp_error err);
                 not_found)
@@ -314,20 +341,22 @@ struct
         Log.warn (fun l -> l "%a" Store.pp_error err);
         Lwt.return not_found
 
-  let router blog coms =
+  let router git_ctx blog coms =
+    let blog = ref blog in
+    let coms = ref coms in
     M.router
       [
-        M.route ("/" ^ Key_gen.hook ()) (sync ~blog ~coms);
+        M.route ("/" ^ Key_gen.hook ()) (sync git_ctx ~blog ~coms);
         M.route "/misc.gmi" serve_misc;
         M.route "/articles" (fun _ ->
             M.respond Mehari.redirect_temp "/gemlog.gmi");
         M.route "/articles/comments.xml" comments_feed;
         M.route ~regex:true {|/articles/([a-zA-Z0-9_-]+\.gmi)/comment|}
-          (post_com blog coms);
+          (post_com !blog !coms);
         M.route ~regex:true {|/articles/([a-zA-Z0-9_-]+\.gmi)|}
-          (serve_article blog coms);
-        M.route "/randbanner" (serve_random_banners blog);
-        M.route ~regex:true "/(.*)" (serve_static blog);
+          (serve_article !blog !coms);
+        M.route "/randbanner" (serve_random_banners !blog);
+        M.route ~regex:true "/(.*)" (serve_static !blog);
       ]
 
   let start git_ctx _default_clock () stack _default_time =
@@ -335,6 +364,6 @@ struct
     let* certs = X.certificate certs_remote `Default in
     let* blog = Git_kv.connect git_ctx (Key_gen.blog_remote ()) in
     let* coms = Git_kv.connect git_ctx (Key_gen.comments_remote ()) in
-    router blog coms |> M.logger
+    router git_ctx blog coms |> M.logger
     |> M.run ?port:(Key_gen.port ()) ~certchains:[ certs ] stack
 end
